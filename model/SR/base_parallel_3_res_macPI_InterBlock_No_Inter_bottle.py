@@ -167,7 +167,7 @@ class AltFilter(nn.Module):
         buffer4, buffer5 = self.InterBlock(buffer, buffer)
         buffer4 = self.conv_de_4(buffer4)
         buffer5 = self.conv_de_5(buffer5)
-        buffer = torch.cat([buffer1,buffer2,buffer3,buffer4, buffer5],dim = 1)
+        buffer = torch.cat([buffer1,buffer2,buffer3,buffer4, buffer5],dim = 1)+buffer
         return buffer
 
 
