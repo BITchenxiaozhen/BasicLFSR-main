@@ -118,7 +118,7 @@ def main(args):
 
     '''Tensorboard'''
     if args.tensorboard:
-        writer = SummaryWriter(log_dir='./tf_logs', filename_suffix=str(args.epoch), flush_secs=180)
+        writer = SummaryWriter(log_dir='./tf_logs/'+args.model_name, filename_suffix=str(args.epoch), flush_secs=180)
 
     ''' TRAINING & TEST '''
     logger.log_string('\nStart training...')
