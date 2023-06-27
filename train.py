@@ -151,7 +151,7 @@ def main(args):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            # torch.cuda.empty_cache()
+            torch.cuda.empty_cache()
 
             '''Tensorboard write log'''
             if cur_iter % args.iter == 0:
