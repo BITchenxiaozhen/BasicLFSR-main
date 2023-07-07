@@ -152,6 +152,242 @@ def interpolate(x, angRes, scale_factor, mode):
                                                                       W * scale_factor)  # [B, 1, A*h*S, A*w*S]
     return x_upscale
 
+class Attention(nn.Module):
+    def __init__(self, in_planes, out_planes, kernel_size, groups=1, reduction=0.0625, kernel_num=4, min_channel=16):
+        super(Attention, self).__init__()
+        attention_channel = max(int(in_planes * reduction), min_channel)
+        self.kernel_size = kernel_size
+        self.kernel_num = kernel_num
+        self.temperature = 1.0
+
+        self.avgpool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Conv2d(in_planes, attention_channel, 1, bias=False)
+        self.bn = nn.BatchNorm2d(attention_channel)
+        self.relu = nn.ReLU(inplace=True)
+
+        self.channel_fc = nn.Conv2d(attention_channel, in_planes, 1, bias=True)
+        self.func_channel = self.get_channel_attention
+
+        if in_planes == groups and in_planes == out_planes:  # depth-wise convolution
+            self.func_filter = self.skip
+        else:
+            self.filter_fc = nn.Conv2d(attention_channel, out_planes, 1, bias=True)
+            self.func_filter = self.get_filter_attention
+
+        if kernel_size == 1:  # point-wise convolution
+            self.func_spatial = self.skip
+        else:
+            self.spatial_fc = nn.Conv2d(attention_channel, kernel_size * kernel_size, 1, bias=True)
+            self.func_spatial = self.get_spatial_attention
+
+        if kernel_num == 1:
+            self.func_kernel = self.skip
+        else:
+            self.kernel_fc = nn.Conv2d(attention_channel, kernel_num, 1, bias=True)
+            self.func_kernel = self.get_kernel_attention
+
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            if isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+    def update_temperature(self, temperature):
+        self.temperature = temperature
+
+    @staticmethod
+    def skip(_):
+        return 1.0
+
+    def get_channel_attention(self, x):
+        channel_attention = torch.sigmoid(self.channel_fc(x).view(x.size(0), -1, 1, 1) / self.temperature)
+        return channel_attention
+
+    def get_filter_attention(self, x):
+        filter_attention = torch.sigmoid(self.filter_fc(x).view(x.size(0), -1, 1, 1) / self.temperature)
+        return filter_attention
+
+    def get_spatial_attention(self, x):
+        spatial_attention = self.spatial_fc(x).view(x.size(0), 1, 1, 1, self.kernel_size, self.kernel_size)
+        spatial_attention = torch.sigmoid(spatial_attention / self.temperature)
+        return spatial_attention
+
+    def get_kernel_attention(self, x):
+        kernel_attention = self.kernel_fc(x).view(x.size(0), -1, 1, 1, 1, 1)
+        kernel_attention = F.softmax(kernel_attention / self.temperature, dim=1)
+        return kernel_attention
+
+    def forward(self, x):
+        B = x.size()[0]
+        x = self.avgpool(x)
+        x = self.fc(x)
+        if B == 1:
+            pass
+        else:
+            x = self.bn(x)
+        x = self.relu(x)
+        return self.func_channel(x), self.func_filter(x), self.func_spatial(x), self.func_kernel(x)
+
+class ODConv2d(nn.Module):
+    def __init__(self, in_planes, out_planes, kernel_size, stride=1, padding=0, dilation=1, groups=1,
+                 reduction=0.0625, kernel_num=4):
+        super(ODConv2d, self).__init__()
+        self.in_planes = in_planes
+        self.out_planes = out_planes
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+        self.groups = groups
+        self.kernel_num = kernel_num
+        self.attention = Attention(in_planes, out_planes, kernel_size, groups=groups,
+                                   reduction=reduction, kernel_num=kernel_num)
+        self.weight = nn.Parameter(torch.randn(kernel_num, out_planes, in_planes//groups, kernel_size, kernel_size),
+                                   requires_grad=True)
+        self._initialize_weights()
+
+        if self.kernel_size == 1 and self.kernel_num == 1:
+            self._forward_impl = self._forward_impl_pw1x
+        else:
+            self._forward_impl = self._forward_impl_common
+
+    def _initialize_weights(self):
+        for i in range(self.kernel_num):
+            nn.init.kaiming_normal_(self.weight[i], mode='fan_out', nonlinearity='relu')
+
+    def update_temperature(self, temperature):
+        self.attention.update_temperature(temperature)
+
+    def _forward_impl_common(self, x):
+        # Multiplying channel attention (or filter attention) to weights and feature maps are equivalent,
+        # while we observe that when using the latter method the models will run faster with less gpu memory cost.
+        channel_attention, filter_attention, spatial_attention, kernel_attention = self.attention(x)
+        batch_size, in_planes, height, width = x.size()
+        x = x * channel_attention
+        x = x.reshape(1, -1, height, width)
+        aggregate_weight = spatial_attention * kernel_attention * self.weight.unsqueeze(dim=0)
+        aggregate_weight = torch.sum(aggregate_weight, dim=1).view(
+            [-1, self.in_planes // self.groups, self.kernel_size, self.kernel_size])
+        output = F.conv2d(x, weight=aggregate_weight, bias=None, stride=self.stride, padding=self.padding,
+                          dilation=self.dilation, groups=self.groups * batch_size)
+        output = output.view(batch_size, self.out_planes, output.size(-2), output.size(-1))
+        output = output * filter_attention
+        return output
+
+    def _forward_impl_pw1x(self, x):
+        channel_attention, filter_attention, spatial_attention, kernel_attention = self.attention(x)
+        x = x * channel_attention
+        output = F.conv2d(x, weight=self.weight.squeeze(dim=0), bias=None, stride=self.stride, padding=self.padding,
+                          dilation=self.dilation, groups=self.groups)
+        output = output * filter_attention
+        return output
+
+    def forward(self, x):
+        # x = SAIs2SAI(x,5)
+        x = self._forward_impl(x)
+        # x = SAI2SAIs(x,5)
+        return x
+
+class iAFF(nn.Module):
+    '''
+    多特征融合 iAFF
+    '''
+
+    def __init__(self, channels=64, r=4):
+        super(iAFF, self).__init__()
+        inter_channels = int(channels // r)
+
+        # 本地注意力
+        self.local_att = nn.Sequential(
+            nn.Conv3d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+            # nn.BatchNorm3d(inter_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv3d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+            # nn.BatchNorm3d(channels),
+        )
+
+        # 全局注意力
+        self.global_att = nn.Sequential(
+            nn.AdaptiveAvgPool3d(1),
+            nn.Conv3d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+            # nn.BatchNorm3d(inter_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv3d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+            # nn.BatchNorm3d(channels),
+        )
+
+        # 第二次本地注意力
+        self.local_att2 = nn.Sequential(
+            nn.Conv3d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+            # nn.BatchNorm3d(inter_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv3d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+            # nn.BatchNorm3d(channels),
+        )
+        # 第二次全局注意力
+        self.global_att2 = nn.Sequential(
+            nn.AdaptiveAvgPool3d(1),
+            nn.Conv3d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+            # nn.BatchNorm3d(inter_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv3d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+            # nn.BatchNorm3d(channels),
+        )
+
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x, residual):
+        xa = x + residual
+        xl = self.local_att(xa)
+        xg = self.global_att(xa)
+        xlg = xl + xg
+        wei = self.sigmoid(xlg)
+        xi = x * wei + residual * (1 - wei)
+
+        xl2 = self.local_att2(xi)
+        xg2 = self.global_att(xi)
+        xlg2 = xl2 + xg2
+        wei2 = self.sigmoid(xlg2)
+        xo = x * wei2 + residual * (1 - wei2)
+        return xo
+
+class MacPI(nn.Module):
+    def __init__(self,angRes):
+        super(MacPI,self).__init__()
+        self.angRes = angRes
+        self.macPI_ang1 = nn.Sequential(
+            ODConv2d(60, 25, kernel_size=1, dilation=1, padding=0, stride=1, reduction=0.0625, kernel_num=4),
+            ODConv2d(25, 25, kernel_size=5, dilation=1, padding=2, stride=5, groups=5, reduction=0.0625, kernel_num=4),
+            nn.ReLU()
+        )
+        self.macPI_ang2 = nn.Sequential(
+            ODConv2d(60, 25, kernel_size=1, dilation=1, padding=0, stride=1, reduction=0.0625, kernel_num=4),
+            ODConv2d(25, 25, kernel_size=5 * 2, dilation=1, padding=3, stride=5, groups=5, reduction=0.0625,
+                     kernel_num=4),
+            nn.ReLU()
+        )
+        self.conv1x1_1 = nn.Conv3d(1,60,1)
+        self.conv1x1_2 = nn.Conv3d(1, 60, 1)
+        self.sigmoid = nn.Sigmoid()
+    def forward(self, x):
+        b,c,a,h,w = x.size()
+        y_copy = rearrange(x, 'b c (a1 a2) h w -> b c (h a1) (w a2)', a1=self.angRes, a2=self.angRes)
+
+        y = self.macPI_ang1(y_copy).view(b,-1,a,h,w)
+        y2 = self.macPI_ang2(y_copy).view(b,-1,a,h,w)
+        y = self.conv1x1_1(y)
+        y2 = self.conv1x1_1(y2)
+        y = y + y2
+        y = self.sigmoid(y)
+        y = x * y.expand_as(x)+x
+
+        return x
 
 class BasicTrans(nn.Module):
     def __init__(self, channels, spa_dim, num_heads=6, dropout=0.):
@@ -208,50 +444,51 @@ class BasicTrans(nn.Module):
         buffer = rearrange(epi_token, '(v w) (b n) c -> b c n v w', v=v, w=w, n=n)
 
         return buffer
-
-
 class AltFilter2(nn.Module):
     def __init__(self, angRes, channels=60):
         super(AltFilter2, self).__init__()
         self.angRes = angRes
-        self.epi_trans1 = BasicTrans(channels, 2*channels)
-        # self.epi_trans2 = BasicTrans(channels, 2*channels)
-        self.spa_trans = BasicTrans(channels, 2*channels)
-        # self.conv = nn.Sequential(
-        #     nn.Conv3d(channels, channels, kernel_size=(1, 3, 3), padding=(0, 1, 1), bias=False),
-        #     nn.LeakyReLU(0.2, inplace=True),
-        #     nn.Conv3d(channels, channels, kernel_size=(1, 3, 3), padding=(0, 1, 1), bias=False),
-        #     nn.LeakyReLU(0.2, inplace=True),
-        #     nn.Conv3d(channels, channels, kernel_size=(1, 3, 3), padding=(0, 1, 1), bias=False),
-        # )
-        self.conv = nn.Sequential(
-            nn.Conv3d(channels*3, channels, kernel_size=(1, 3, 3), padding=(0, 1, 1), bias=False),
-        )
+        self.epi_trans = BasicTrans(channels, channels*2)
+        self.spa_trans = BasicTrans(channels, channels)
+        self.ang_trans = BasicTrans(channels, channels)
+        self.macPI = MacPI(5)
+
+        self.iAFF1 = iAFF(60, 6)
+        self.iAFF2 = iAFF(60, 6)
+        self.iAFF3 = iAFF(60, 6)
 
     def forward(self, buffer):
         shortcut = buffer
         [_, _, _, h, w] = buffer.size()
-        self.epi_trans1.mask_field = [self.angRes * 2, 11]
-        # self.epi_trans2.mask_field = [self.angRes * 2, 11]
+        self.epi_trans.mask_field = [self.angRes * 2, 11]
         self.spa_trans.mask_field = [self.angRes * 2, 11]
+        self.ang_trans.mask_field = [2 * 2, 2]
 
         # Horizontal
         buffer1 = rearrange(buffer, 'b c (u v) h w -> b c (v w) u h', u=self.angRes, v=self.angRes)
-        buffer1 = self.epi_trans1(buffer1)
+        buffer1 = self.epi_trans(buffer1)
         buffer1 = rearrange(buffer1, 'b c (v w) u h -> b c (u v) h w', u=self.angRes, v=self.angRes, h=h, w=w)
         # buffer = self.conv(buffer)
-
         # Vertical
-        buffer2 = rearrange(buffer, 'b c (u v) h w -> b c (u h) v w', u=self.angRes, v=self.angRes)
-        buffer2 = self.epi_trans1(buffer2)
-        buffer2 = rearrange(buffer2, 'b c (u h) v w -> b c (u v) h w', u=self.angRes, v=self.angRes, h=h, w=w)
+        buffer1 = rearrange(buffer1, 'b c (u v) h w -> b c (u h) v w', u=self.angRes, v=self.angRes)
+        buffer1 = self.epi_trans(buffer1)
+        buffer1 = rearrange(buffer1, 'b c (u h) v w -> b c (u v) h w', u=self.angRes, v=self.angRes, h=h, w=w)
         # buffer = self.conv(buffer)
 
         # buffer3 = rearrange(buffer, 'b c (u v) h w -> b c (u h) v w', u=self.angRes, v=self.angRes)
-        buffer3 = self.spa_trans(buffer)
-        # buffer2 = rearrange(buffer2, 'b c (u h) v w -> b c (u v) h w', u=self.angRes, v=self.angRes, h=h, w=w)
-        buffer = self.conv(torch.cat([buffer1,buffer2,buffer3],dim = 1))
-        return buffer
+        buffer2 = self.spa_trans(buffer)
+        buffer2 = rearrange(buffer2, 'b c (u v) h w -> b c (h w) u v', u=self.angRes, v=self.angRes, h=h, w=w)
+        buffer2 = self.ang_trans(buffer2)
+        buffer2 = rearrange(buffer2, 'b c (h w) u v -> b c (u v) h w', u=self.angRes, v=self.angRes, h=h, w=w)
+
+        buffer3 = self.macPI(buffer)
+
+        buffer11 = self.iAFF1(buffer1, buffer2)
+        buffer111 = self.iAFF2(buffer11, buffer3)
+        buffer1111 = self.iAFF3(buffer111, shortcut)
+        return buffer1111
+
+        return buffer1111
 
 
 def LF_interpolate(LF, scale_factor, mode):
