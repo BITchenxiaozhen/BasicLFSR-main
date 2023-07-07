@@ -71,6 +71,7 @@ class get_model(nn.Module):
         out = buffer + lr_upscale
 
         return out
+
 class Attention(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size, groups=1, reduction=0.0625, kernel_num=4, min_channel=16):
         super(Attention, self).__init__()
@@ -143,9 +144,13 @@ class Attention(nn.Module):
         return kernel_attention
 
     def forward(self, x):
+        B = x.size()[0]
         x = self.avgpool(x)
         x = self.fc(x)
-        x = self.bn(x)
+        if B == 1:
+            pass
+        else:
+            x = self.bn(x)
         x = self.relu(x)
         return self.func_channel(x), self.func_filter(x), self.func_spatial(x), self.func_kernel(x)
 
@@ -246,11 +251,10 @@ class MacPI(nn.Module):
     def forward(self, x):
         b,c,a,h,w = x.size()
         y_copy = rearrange(x, 'b c (a1 a2) h w -> b c (h a1) (w a2)', a1=self.angRes, a2=self.angRes)
-
         y = self.macPI_ang1(y_copy)
         y2 = self.macPI_ang2(y_copy)
         y = y + y2
-        y = self.sigmoid(y)
+        y = self.sigmoid(y).view(b,-1,a,h,w)
         y = x * y.expand_as(x)+x
         return x
 

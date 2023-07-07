@@ -144,9 +144,13 @@ class Attention(nn.Module):
         return kernel_attention
 
     def forward(self, x):
+        B = x.size()[0]
         x = self.avgpool(x)
         x = self.fc(x)
-        x = self.bn(x)
+        if B == 1:
+            pass
+        else:
+            x = self.bn(x)
         x = self.relu(x)
         return self.func_channel(x), self.func_filter(x), self.func_spatial(x), self.func_kernel(x)
 
@@ -226,13 +230,17 @@ class MacPI(nn.Module):
                      kernel_num=4),
             nn.ReLU()
         )
+        self.conv1x1_1 = nn.Conv3d(1,60,1)
+        self.conv1x1_2 = nn.Conv3d(1, 60, 1)
         self.sigmoid = nn.Sigmoid()
     def forward(self, x):
         b,c,a,h,w = x.size()
         y_copy = rearrange(x, 'b c (a1 a2) h w -> b c (h a1) (w a2)', a1=self.angRes, a2=self.angRes)
 
-        y = self.macPI_ang1(y_copy)
-        y2 = self.macPI_ang2(y_copy)
+        y = self.macPI_ang1(y_copy).view(b,-1,a,h,w)
+        y2 = self.macPI_ang2(y_copy).view(b,-1,a,h,w)
+        y = self.conv1x1_1(y)
+        y2 = self.conv1x1_1(y2)
         y = y + y2
         y = self.sigmoid(y)
         y = x * y.expand_as(x)+x
