@@ -312,7 +312,7 @@ class MacPI(nn.Module):
         y = y + y2
         y = self.sigmoid(y)
         y = x * y.expand_as(x)+x
-        return x
+        return y
 
 
 class AltFilter(nn.Module):
