@@ -151,20 +151,22 @@ def main(args):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
 
             '''Tensorboard write log'''
             if cur_iter % args.iter == 0:
                 test_average_psnr, test_average_ssim = test(args, test_Names, test_Loaders, net,writer, all_iter, logger)
 
                 ''' Save Best PTH  '''
-                if args.local_rank == 0 and test_average_psnr > best_average_psnr:
+                if test_average_psnr > best_average_psnr:
+                    best_average_psnr = test_average_psnr
                     save_pth(args, checkpoints_dir, logger, idx_epoch, net, best=True)
         "epoch val"
         test_average_psnr, test_average_ssim = test(args, test_Names, test_Loaders, net, writer, all_iter, logger)
 
         ''' Save PTH  '''
         if args.local_rank == 0 and test_average_psnr > best_average_psnr:
+            best_average_psnr = test_average_psnr
             save_pth(args, checkpoints_dir, logger, idx_epoch, net, best=True)
         save_pth(args, checkpoints_dir, logger, idx_epoch, net)
         ''' scheduler '''
