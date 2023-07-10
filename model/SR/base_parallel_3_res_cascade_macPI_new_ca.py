@@ -244,7 +244,7 @@ class MacPI(nn.Module):
         y = y + y2
         y = self.sigmoid(y)
         y = x * y.expand_as(x)+x
-        return x
+        return y
 
 class SELayer(nn.Module):
     def __init__(self, channel, reduction=6):
@@ -292,7 +292,7 @@ class AltFilter(nn.Module):
         buffer333 = self.SElayer(buffer32)
         buffer = self.softmax_(buffer1)*self.softmax_(buffer111)*self.softmax_(buffer222)*self.softmax_(buffer333)+buffer
 
-        return buffer3
+        return buffer
 
 class EPIFilter(nn.Module):
     def __init__(self, angRes):

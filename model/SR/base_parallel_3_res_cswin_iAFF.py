@@ -314,6 +314,7 @@ class MacPI(nn.Module):
         y = x * y.expand_as(x)+x
         return y
 
+
 class AltFilter(nn.Module):
     def __init__(self, angRes):
         super(AltFilter, self).__init__()
@@ -323,25 +324,24 @@ class AltFilter(nn.Module):
 
         self.softmax_ = nn.Softmax(dim=2)
         # self.conv_de = nn.Conv3d(60*3, 60, kernel_size=(1, 3, 3), padding=(0, 1, 1), dilation=1, bias=False)
-        self.macPI = MacPI(angRes)
+        self.macPI = nn.Sequential(
+            CSWinIR(is_spa=False,patch_size=5, transtype=5, angRes=angRes, depths=1),
+            CSWinIR(is_spa=False,patch_size=10, transtype=5, angRes=angRes, depths=1)
+        )
         self.EPIFilter = EPIFilter(angRes=angRes)
-        self.conv_1x1 = nn.Conv3d(60,60,kernel_size=1,padding=0,stride=1)
-        # self.iAFF1 = iAFF(60, 6)
-        # self.iAFF2 = iAFF(60, 6)
-        # self.iAFF3 = iAFF(60, 6)
+        self.iAFF1 = iAFF(60, 6)
+        self.iAFF2 = iAFF(60, 6)
+        self.iAFF3 = iAFF(60, 6)
         # self.iAFF4 = iAFF(60, 6)
     def forward(self, buffer):
         buffer1 = self.spa_trans(self.ang_trans(buffer))
         buffer2 = self.EPIFilter(buffer)
         buffer3 = self.macPI(buffer)
         # buffer_tmp = torch.cat([buffer1,buffer2,buffer3],dim = 1)
-        # buffer11 = self.iAFF1(buffer1,buffer2)
-        # buffer111 = self.iAFF2(buffer11,buffer3)
-        # buffer1111 = self.iAFF3(buffer111,buffer)
-        buffer11 = nn.functional.softmax(buffer1*buffer2)
-        buffer111 = self.conv_1x1(buffer3*buffer11)
-        buffer = self.conv_1x1(buffer111) + buffer
-        return buffer
+        buffer11 = self.iAFF1(buffer1,buffer2)
+        buffer111 = self.iAFF2(buffer11,buffer3)
+        buffer1111 = self.iAFF3(buffer111,buffer)
+        return buffer1111
 
 class EPIFilter(nn.Module):
     def __init__(self, angRes):
@@ -863,6 +863,11 @@ class CSWinIR(nn.Module):
             mod_pad_a = (self.split_size - self.angRes % self.split_size) % self.split_size
             mod_pad_h = (self.split_size - h % self.split_size) % self.split_size
             x = F.pad(x, (0, mod_pad_a, 0, mod_pad_h), 'reflect')
+        elif transtype == 5:
+            x = rearrange(x, 'b c (a1 a2) h w -> b c (h a1) (w a2)', a1=self.angRes, a2=self.angRes)
+            mod_pad_a = (self.split_size - self.angRes % self.split_size) % self.split_size
+            mod_pad_h = (self.split_size - h % self.split_size) % self.split_size
+            x = F.pad(x, (0, mod_pad_a, 0, mod_pad_h), 'reflect')
         return x
 
     def forward_features(self, x):
@@ -881,6 +886,8 @@ class CSWinIR(nn.Module):
             x = rearrange(x, '(b h a1) c w a2->(b a1 a2) c h w', a1=self.angRes, a2=self.angRes, h=H, w=W)
         if self.transtype == 4:
             x = rearrange(x, '(b w a2) c h a1->(b a1 a2) c h w', a1=self.angRes, a2=self.angRes, h=H, w=W)
+        if self.transtype == 5:
+            x = rearrange(x, 'b c (h a1) (w a2)->(b a1 a2) c h w', a1=self.angRes, a2=self.angRes, h=H, w=W)
         x = x[:, :, :H, :W]
         x = x.view(b, a, c, H, W)
         x = x.permute(0, 2, 1, 3, 4)
