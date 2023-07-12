@@ -424,12 +424,12 @@ class body(nn.Module):
         buffer8 = self.AltFilter8(buffer7)
 
         pbuffer1 = self.Pconv1(buffer8,buffer7)
-        pbuffer2 = self.Pconv1(buffer6, pbuffer1)
-        pbuffer3 = self.Pconv1(buffer5, pbuffer2)
-        pbuffer4 = self.Pconv1(buffer4, pbuffer3)
-        pbuffer5 = self.Pconv1(buffer3, pbuffer4)
-        pbuffer6 = self.Pconv1(buffer2, pbuffer5)
-        pbuffer7 = self.Pconv1(buffer1, pbuffer6) + buffer
+        pbuffer2 = self.Pconv2(buffer6, pbuffer1)
+        pbuffer3 = self.Pconv3(buffer5, pbuffer2)
+        pbuffer4 = self.Pconv4(buffer4, pbuffer3)
+        pbuffer5 = self.Pconv5(buffer3, pbuffer4)
+        pbuffer6 = self.Pconv6(buffer2, pbuffer5)
+        pbuffer7 = self.Pconv7(buffer1, pbuffer6) + buffer
 
         return pbuffer7
 
