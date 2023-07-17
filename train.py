@@ -177,9 +177,10 @@ def save_pth(args, checkpoints_dir, logger, idx_epoch, net, best = False):
     if args.local_rank == 0:
         temp = ''
         if best:
-            temp += '/%s_%dx%d_%dx_epoch_%02d_model.pth' % (args.model_name, args.angRes_in, args.angRes_in, args.scale_factor, idx_epoch + 1)
-        else:
             temp += '/best_model.pth'
+        else:
+            temp += '/%s_%dx%d_%dx_epoch_%02d_model.pth' % (
+            args.model_name, args.angRes_in, args.angRes_in, args.scale_factor, idx_epoch + 1)
         save_ckpt_path = str(checkpoints_dir) + temp
         state = {
             'epoch': idx_epoch + 1,
