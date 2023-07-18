@@ -400,8 +400,8 @@ class MacPI(nn.Module):
 
         y = self.macPI_ang1(x)
         y2 = self.macPI_ang2(x)
-        y = self.conv1x1_1(y)
-        y2 = self.conv1x1_1(y2)
+        # y = self.conv1x1_1(y)
+        # y2 = self.conv1x1_1(y2)
         y = y + y2
         y = self.sigmoid(y)
         y = x * y.expand_as(x)+x
