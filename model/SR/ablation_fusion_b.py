@@ -397,7 +397,6 @@ class MacPI(nn.Module):
     def forward(self, x):
         b,c,a,h,w = x.size()
         # y_copy = rearrange(x, 'b c (a1 a2) h w -> b c (h a1) (w a2)', a1=self.angRes, a2=self.angRes)
-
         y = self.macPI_ang1(x)
         y2 = self.macPI_ang2(x)
         # y = self.conv1x1_1(y)
