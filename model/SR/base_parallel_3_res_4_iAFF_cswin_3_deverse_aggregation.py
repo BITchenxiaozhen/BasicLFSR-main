@@ -257,14 +257,14 @@ class iAFF(nn.Module):
             # nn.BatchNorm3d(channels),
         )
         # 第二次全局注意力
-        # self.global_att2 = nn.Sequential(
-        #     nn.AdaptiveAvgPool3d(1),
-        #     nn.Conv3d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
-        #     # nn.BatchNorm3d(inter_channels),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv3d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
-        #     # nn.BatchNorm3d(channels),
-        # )
+        self.global_att2 = nn.Sequential(
+            nn.AdaptiveAvgPool3d(1),
+            nn.Conv3d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+            # nn.BatchNorm3d(inter_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv3d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+            # nn.BatchNorm3d(channels),
+        )
 
         self.local_att_epi = nn.Sequential(
             nn.Conv3d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
@@ -289,14 +289,14 @@ class iAFF(nn.Module):
             # nn.BatchNorm3d(channels),
         )
 
-        # self.global_att2_epi = nn.Sequential(
-        #     nn.AdaptiveAvgPool3d(1),
-        #     nn.Conv3d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
-        #     # nn.BatchNorm3d(inter_channels),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv3d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
-        #     # nn.BatchNorm3d(channels),
-        # )
+        self.global_att2_epi = nn.Sequential(
+            nn.AdaptiveAvgPool3d(1),
+            nn.Conv3d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+            # nn.BatchNorm3d(inter_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv3d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+            # nn.BatchNorm3d(channels),
+        )
 
 
         self.local_att_mac = nn.Sequential(
@@ -322,14 +322,14 @@ class iAFF(nn.Module):
             # nn.BatchNorm3d(channels),
         )
 
-        # self.global_att2_mac = nn.Sequential(
-        #     nn.AdaptiveAvgPool3d(1),
-        #     nn.Conv3d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
-        #     # nn.BatchNorm3d(inter_channels),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv3d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
-        #     # nn.BatchNorm3d(channels),
-        # )
+        self.global_att2_mac = nn.Sequential(
+            nn.AdaptiveAvgPool3d(1),
+            nn.Conv3d(channels, inter_channels, kernel_size=1, stride=1, padding=0),
+            # nn.BatchNorm3d(inter_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv3d(inter_channels, channels, kernel_size=1, stride=1, padding=0),
+            # nn.BatchNorm3d(channels),
+        )
 
         self.sigmoid = nn.Sigmoid()
 
@@ -355,17 +355,17 @@ class iAFF(nn.Module):
         xi = (x * wei + residual * (1 - wei) + y * weie + residual * (1 - weie) + z * weim + residual * (1 - weim))/3
 
         xl2 = self.local_att2(xi)
-        xg2 = self.global_att(xi)
+        xg2 = self.global_att2(xi)
         xlg2 = xl2 + xg2
         wei2 = self.sigmoid(xlg2)
 
         xle2 = self.local_att2_epi(xi)
-        xge2 = self.global_att_epi(xi)
+        xge2 = self.global_att2_epi(xi)
         xlge2 = xle2 + xge2
         weie2 = self.sigmoid(xlge2)
 
         xlm2 = self.local_att2_mac(xi)
-        xgm2 = self.global_att_mac(xi)
+        xgm2 = self.global_att2_mac(xi)
         xlgm2 = xlm2 + xgm2
         weim2 = self.sigmoid(xlgm2)
 
@@ -491,13 +491,13 @@ class body(nn.Module):
         self.AltFilter8 = AltFilter(angRes=angRes)
         # self.EPIFilter = EPIFilter(angRes=angRes)
 
-        self.Pconv1 = Partial_conv3(60,2)
-        self.Pconv2 = Partial_conv3(60, 2)
-        self.Pconv3 = Partial_conv3(60, 2)
-        self.Pconv4 = Partial_conv3(60, 2)
-        self.Pconv5 = Partial_conv3(60, 2)
-        self.Pconv6 = Partial_conv3(60, 2)
-        self.Pconv7 = Partial_conv3(60,2)
+        # self.Pconv1 = Partial_conv3(60,2)
+        # self.Pconv2 = Partial_conv3(60, 2)
+        # self.Pconv3 = Partial_conv3(60, 2)
+        # self.Pconv4 = Partial_conv3(60, 2)
+        # self.Pconv5 = Partial_conv3(60, 2)
+        # self.Pconv6 = Partial_conv3(60, 2)
+        # self.Pconv7 = Partial_conv3(60,2)
 
 
     def forward(self, buffer):
@@ -511,15 +511,15 @@ class body(nn.Module):
         buffer7 = self.AltFilter7(buffer6)
         buffer8 = self.AltFilter8(buffer7)
 
-        pbuffer1 = self.Pconv1(buffer8,buffer7)
-        pbuffer2 = self.Pconv2(buffer6, pbuffer1)
-        pbuffer3 = self.Pconv3(buffer5, pbuffer2)
-        pbuffer4 = self.Pconv4(buffer4, pbuffer3)
-        pbuffer5 = self.Pconv5(buffer3, pbuffer4)
-        pbuffer6 = self.Pconv6(buffer2, pbuffer5)
-        pbuffer7 = self.Pconv7(buffer1, pbuffer6) + buffer
+        # pbuffer1 = self.Pconv1(buffer8,buffer7)
+        # pbuffer2 = self.Pconv2(buffer6, pbuffer1)
+        # pbuffer3 = self.Pconv3(buffer5, pbuffer2)
+        # pbuffer4 = self.Pconv4(buffer4, pbuffer3)
+        # pbuffer5 = self.Pconv5(buffer3, pbuffer4)
+        # pbuffer6 = self.Pconv6(buffer2, pbuffer5)
+        # pbuffer7 = self.Pconv7(buffer1, pbuffer6) + buffer
 
-        return pbuffer7
+        return buffer8
 
 def interpolate(x, angRes, scale_factor, mode):
     [B, _, H, W] = x.size()
